@@ -44,7 +44,7 @@ def train_model():
     # save_all_words()
     # voc = load_vocabulary(vocabulary_location)
     # export_trimmed_vectors(voc)
-    # #
+    #
     # =============================================================
     word_vectors = get_trimmed_vectors(trimmed_embeddings_file)
 
@@ -741,6 +741,7 @@ def build_train_data(training_data, training_tags):
     ids_tags = []
     words_to_ids, ids_to_words = convert_words_to_ids('./vocabulary/words')
     tags_to_ids, ids_to_tags = convert_tags_to_ids('./vocabulary/tags')
+
     chars_to_ids, _ = convert_words_to_ids('./vocabulary/chars')
 
     chars_in_word = []
@@ -845,9 +846,9 @@ def get_chunks(seq, tags):
     # for i, tag in enumerate(tags_arr):
     #     # tag = tag.decode(encoding)
     #     tags[tag] = i
-
+    print(tags)
+    print(seq)
     default = tags['O']
-
     idx_to_tag = {idx: tag for tag, idx in tags.items()}
     chunks = []
     chunk_type, chunk_start = None, None
@@ -917,8 +918,12 @@ def evaluate(sess, test_data_ids, test_tags_id, chars_ids_test, placeholders, pa
             lab = lab[:length]
             lab_pred = lab_pred[:length]
             accs += [a == b for (a, b) in zip(lab, lab_pred)]
+            print('real values')
             lab_chunks = set(get_chunks(lab, tags))
+            print(lab_chunks)
+            print('predicted')
             lab_pred_chunks = set(get_chunks(lab_pred, tags))
+            print(lab_pred_chunks)
 
             correct_preds += len(lab_chunks & lab_pred_chunks)
             total_preds += len(lab_pred_chunks)
