@@ -3,12 +3,15 @@ import re
 
 from collections import defaultdict, namedtuple
 
-ANY_SPACE = '<SPACE>'
+ANY_SPACE = ' '
+
 
 class FormatError(Exception):
     pass
 
+
 Metrics = namedtuple('Metrics', 'tp fp fn prec rec fscore')
+
 
 class EvalCounts(object):
     def __init__(self):
@@ -22,6 +25,7 @@ class EvalCounts(object):
         self.t_correct_chunk = defaultdict(int)
         self.t_found_correct = defaultdict(int)
         self.t_found_guessed = defaultdict(int)
+
 
 def parse_args(argv):
     import argparse
@@ -39,9 +43,11 @@ def parse_args(argv):
     arg('file', nargs='?', default=None)
     return parser.parse_args(argv)
 
+
 def parse_tag(t):
     m = re.match(r'^([^-]*)-(.*)$', t)
     return m.groups() if m else (t, '')
+
 
 def evaluate(iterable, options=None):
     if options is None:
@@ -72,7 +78,8 @@ def evaluate(iterable, options=None):
         if len(features) == 0 or features[0] == options.boundary:
             features = [options.boundary, 'O', 'O']
         if len(features) < 3:
-            raise FormatError('unexpected number of features in line %s' % line)
+            raise FormatError(
+                'unexpected number of features in line %s' % line)
 
         guessed, guessed_type = parse_tag(features.pop())
         correct, correct_type = parse_tag(features.pop())
@@ -92,7 +99,7 @@ def evaluate(iterable, options=None):
 
         if in_correct:
             if (end_correct and end_guessed and
-                last_guessed_type == last_correct_type):
+                    last_guessed_type == last_correct_type):
                 in_correct = False
                 counts.correct_chunk += 1
                 counts.t_correct_chunk[last_correct_type] += 1
@@ -124,16 +131,20 @@ def evaluate(iterable, options=None):
 
     return counts
 
+
 def uniq(iterable):
-  seen = set()
-  return [i for i in iterable if not (i in seen or seen.add(i))]
+    print(iterable)
+    seen = set()
+    return [i for i in iterable if not (i in seen or seen.add(i))]
+
 
 def calculate_metrics(correct, guessed, total):
-    tp, fp, fn = correct, guessed-correct, total-correct
-    p = 0 if tp + fp == 0 else 1.*tp / (tp + fp)
-    r = 0 if tp + fn == 0 else 1.*tp / (tp + fn)
+    tp, fp, fn = correct, guessed - correct, total - correct
+    p = 0 if tp + fp == 0 else 1. * tp / (tp + fp)
+    r = 0 if tp + fn == 0 else 1. * tp / (tp + fn)
     f = 0 if p + r == 0 else 2 * p * r / (p + r)
     return Metrics(tp, fp, fn, p, r, f)
+
 
 def metrics(counts):
     c = counts
@@ -141,11 +152,13 @@ def metrics(counts):
         c.correct_chunk, c.found_guessed, c.found_correct
     )
     by_type = {}
-    for t in uniq(c.t_found_correct.keys() + c.t_found_guessed.keys()):
+
+    for t in uniq(c.t_found_correct.keys() | c.t_found_guessed.keys()):
         by_type[t] = calculate_metrics(
             c.t_correct_chunk[t], c.t_found_guessed[t], c.t_found_correct[t]
         )
     return overall, by_type
+
 
 def report(counts, out=None):
     if out is None:
@@ -161,64 +174,87 @@ def report(counts, out=None):
 
     if c.token_counter > 0:
         out.write('accuracy: %6.2f%%; ' %
-                  (100.*c.correct_tags/c.token_counter))
-        out.write('precision: %6.2f%%; ' % (100.*overall.prec))
-        out.write('recall: %6.2f%%; ' % (100.*overall.rec))
-        out.write('FB1: %6.2f\n' % (100.*overall.fscore))
+                  (100. * c.correct_tags / c.token_counter))
+        out.write('precision: %6.2f%%; ' % (100. * overall.prec))
+        out.write('recall: %6.2f%%; ' % (100. * overall.rec))
+        out.write('FB1: %6.2f\n' % (100. * overall.fscore))
 
     for i, m in sorted(by_type.items()):
         out.write('%17s: ' % i)
-        out.write('precision: %6.2f%%; ' % (100.*m.prec))
-        out.write('recall: %6.2f%%; ' % (100.*m.rec))
-        out.write('FB1: %6.2f  %d\n' % (100.*m.fscore, c.t_found_guessed[i]))
+        out.write('precision: %6.2f%%; ' % (100. * m.prec))
+        out.write('recall: %6.2f%%; ' % (100. * m.rec))
+        out.write('FB1: %6.2f  %d\n' % (100. * m.fscore, c.t_found_guessed[i]))
+
 
 def end_of_chunk(prev_tag, tag, prev_type, type_):
     # check if a chunk ended between the previous and current word
     # arguments: previous and current chunk tags, previous and current types
     chunk_end = False
 
-    if prev_tag == 'E': chunk_end = True
-    if prev_tag == 'S': chunk_end = True
+    if prev_tag == 'E':
+        chunk_end = True
+    if prev_tag == 'S':
+        chunk_end = True
 
-    if prev_tag == 'B' and tag == 'B': chunk_end = True
-    if prev_tag == 'B' and tag == 'S': chunk_end = True
-    if prev_tag == 'B' and tag == 'O': chunk_end = True
-    if prev_tag == 'I' and tag == 'B': chunk_end = True
-    if prev_tag == 'I' and tag == 'S': chunk_end = True
-    if prev_tag == 'I' and tag == 'O': chunk_end = True
+    if prev_tag == 'B' and tag == 'B':
+        chunk_end = True
+    if prev_tag == 'B' and tag == 'S':
+        chunk_end = True
+    if prev_tag == 'B' and tag == 'O':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'B':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'S':
+        chunk_end = True
+    if prev_tag == 'I' and tag == 'O':
+        chunk_end = True
 
     if prev_tag != 'O' and prev_tag != '.' and prev_type != type_:
         chunk_end = True
 
     # these chunks are assumed to have length 1
-    if prev_tag == ']': chunk_end = True
-    if prev_tag == '[': chunk_end = True
+    if prev_tag == ']':
+        chunk_end = True
+    if prev_tag == '[':
+        chunk_end = True
 
     return chunk_end
+
 
 def start_of_chunk(prev_tag, tag, prev_type, type_):
     # check if a chunk started between the previous and current word
     # arguments: previous and current chunk tags, previous and current types
     chunk_start = False
 
-    if tag == 'B': chunk_start = True
-    if tag == 'S': chunk_start = True
+    if tag == 'B':
+        chunk_start = True
+    if tag == 'S':
+        chunk_start = True
 
-    if prev_tag == 'E' and tag == 'E': chunk_start = True
-    if prev_tag == 'E' and tag == 'I': chunk_start = True
-    if prev_tag == 'S' and tag == 'E': chunk_start = True
-    if prev_tag == 'S' and tag == 'I': chunk_start = True
-    if prev_tag == 'O' and tag == 'E': chunk_start = True
-    if prev_tag == 'O' and tag == 'I': chunk_start = True
+    if prev_tag == 'E' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'E' and tag == 'I':
+        chunk_start = True
+    if prev_tag == 'S' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'S' and tag == 'I':
+        chunk_start = True
+    if prev_tag == 'O' and tag == 'E':
+        chunk_start = True
+    if prev_tag == 'O' and tag == 'I':
+        chunk_start = True
 
     if tag != 'O' and tag != '.' and prev_type != type_:
         chunk_start = True
 
     # these chunks are assumed to have length 1
-    if tag == '[': chunk_start = True
-    if tag == ']': chunk_start = True
+    if tag == '[':
+        chunk_start = True
+    if tag == ']':
+        chunk_start = True
 
     return chunk_start
+
 
 def main(argv):
     args = parse_args(argv[1:])
@@ -226,9 +262,10 @@ def main(argv):
     if args.file is None:
         counts = evaluate(sys.stdin, args)
     else:
-        with open(args.file) as f:
+        with open(args.file, encoding="utf-8") as f:
             counts = evaluate(f, args)
     report(counts)
+
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))
