@@ -1,63 +1,41 @@
 import codecs
 import tensorflow as tf
 import numpy as np
+import config as cfg
+from random import shuffle
 """
 Note: data should end with two new lines
 """
-encoding = 'utf-8'
-
-vocabulary_location = './vocabulary/words'
-model_location = './results/model'
-
-train_location = './dataset/bg/random1.txt'
-dev_location = './dataset/bg/random2.txt'
-test_location = './dataset/bg/random2.txt'
-
-pretrained_vectors_location = './embeddings/wiki.bg.vec'
-trimmed_embeddings_file = 'embeddings/trimmed.npz'
-
-_lr_m = 'adam'
-dropout = 0.5
-lr = 0.001
-lr_decay = 0.9
-hidden_size_lstm = 300
-hidden_size_char = 100
-dim = 300
-dim_char = 100
-ntags = 9
-
 parameters = {}
 
-batches_size = 20
-nepoch_no_imprv = 5
-
-epoch_range = 15
+encoding = cfg.encoding
 
 
 def train_model():
     """
     training a model
     """
-    train_const = False
+    train_const = True
     #  ===================================================
     # Those can be run once
-    # save_all_words()
-    # voc = load_vocabulary(vocabulary_location)
-    # export_trimmed_vectors(voc)
+    save_all_words()
+    voc = load_vocabulary(cfg.vocabulary_location)
+    export_trimmed_vectors(voc)
     #
     # =============================================================
-    word_vectors = get_trimmed_vectors(trimmed_embeddings_file)
+
+    word_vectors = get_trimmed_vectors(cfg.trimmed_embeddings_file)
 
     training_words, training_tags, _, _, _ = load_train_vocabulary(
-        train_location)
+        cfg.train_location)
 
     training_words_test, training_tags_test, _, _, _ = load_train_vocabulary(
-        test_location)
+        cfg.test_location)
 
-    training_data_ids, training_tags_ids, chars_ids, words_to_ids, ids_to_words = build_train_data(
+    training_data_ids, training_tags_ids, chars_ids, words_to_ids, ids_to_words = build_data(
         training_words, training_tags)
 
-    test_data_ids, test_tags_ids, chars_ids_test, test_id_to_words, _ = build_train_data(
+    test_data_ids, test_tags_ids, chars_ids_test, test_id_to_words, _ = build_data(
         training_words_test, training_tags_test)
 
     placeholders = define_placeholders()
@@ -72,7 +50,7 @@ def train_model():
         parameters = build_model(
             word_vectors, test_data_ids, test_id_to_words, placeholders)
         sess, saver = initialize_session()
-        restore_session('./results/model', saver, sess)
+        restore_session(cfg.model, saver, sess)
 
         evaluate(sess, test_data_ids, test_tags_ids,
                  chars_ids_test, placeholders, parameters)
@@ -85,22 +63,25 @@ def train_model():
 def train(sess, saver, training_data_ids, training_tags_ids, chars_ids, test_data_ids, test_tags_ids, chars_ids_test, parameters, placeholders):
     best_score = 0
     curr_nepoch_no_imprv = 0
-    global nepoch_no_imprv
-    global lr
-    for epoch in range(epoch_range):
-        print('==================')
+    cfg.nepoch_no_imprv
+    cfg.lr
+    for epoch in range(cfg.epoch_range):
+
         print("Epoch Num:", epoch)
         score = run_epoch(sess, saver, training_data_ids, training_tags_ids, chars_ids,
                           test_data_ids, test_tags_ids, chars_ids_test, parameters, placeholders)
-        lr = lr * lr_decay
-        print('new lr', lr)
+        cfg.lr = cfg.lr * cfg.lr_decay
+        print('=============================')
+        print('current score', score)
+        print('best score', best_score)
         if score >= best_score:
             curr_nepoch_no_imprv = 0
-            save_session(sess, saver, model_location)
+            save_session(sess, saver, cfg.model)
             best_score = score
         else:
+            print('no improvements, no improvement: ', curr_nepoch_no_imprv)
             curr_nepoch_no_imprv += 1
-            if curr_nepoch_no_imprv >= nepoch_no_imprv:
+            if curr_nepoch_no_imprv >= cfg.nepoch_no_imprv:
                 print('no improvements')
                 break
 
@@ -108,13 +89,13 @@ def train(sess, saver, training_data_ids, training_tags_ids, chars_ids, test_dat
 def run_epoch(sess, saver, training_data_ids, training_tags_ids, chars_ids, test_data_ids, test_tags_id, chars_ids_test, parameters, placeholders):
 
     batches_training, batches_tags, batches_chars_ids = create_batches(
-        training_data_ids, chars_ids, training_tags_ids, batches_size)
+        training_data_ids, chars_ids, training_tags_ids, cfg.batches_size)
 
     for i, (batch_training, batch_tags, batch_chars_ids) in enumerate(zip(batches_training, batches_tags, batches_chars_ids)):
         print('batch', i)
 
         fd, _ = get_feed(batch_training, batch_chars_ids,
-                         placeholders, batch_tags, lr, dropout)
+                         placeholders, batch_tags, cfg.lr, cfg.dropout)
 
         _, train_loss = sess.run(
             [parameters['train_op'], parameters['loss']], feed_dict=fd)
@@ -130,9 +111,6 @@ def create_batches(training_data, chars_ids, training_tags, n):
     b = [training_tags[i:i + n] for i in range(0, len(training_tags), n)]
     c = [chars_ids[i:i + n] for i in range(0, len(chars_ids), n)]
 
-    print(len(a))
-    print(len(b))
-    print(len(c))
     return a, b, c
 
 
@@ -170,56 +148,16 @@ def get_feed(training_data, batch_chars_ids, placeholders, labels=None, lr=None,
         feed[placeholders['labels']] = labels_
 
     if lr is not None:
-        feed[placeholders['lr']] = lr
+        feed[placeholders['lr']] = cfg.lr
 
     if dropout is not None:
-        feed[placeholders['dropout']] = dropout
+        feed[placeholders['dropout']] = cfg.dropout
 
     return feed, sequence_lengths_
 
 
-# def load_train_vocabulary(path):
-#     sentences = []
-#     sentence = []
-#     vocabulary = set()
-#     vocabulary_for_chars = set()
-#     training_words = []
-#     training_tags = []
-#     tags = []
-#     voc_tags = set()
-#     for line in codecs.open(path, 'r', encoding):
-#         line = line.encode(encoding)
-#         if line.decode(encoding) == "\r\n":
-#             sentences.append(sentence)
-#             sentence = []
-#         else:
-#             sentence.append(line)
-
-#     for s in sentences:
-
-#         sent_words = []
-#         sent_tags = []
-#         for word in s:
-#             # word = word.decode(encoding).split(u'===')
-#             # word_ = word[0].lower().encode(encoding)
-#             # tag = word[2].rstrip('\r\n').encode(encoding)
-#             w = word.decode(encoding).split(' ')
-#             vocabulary.add(w[0].lower())
-#             # vocabulary.add(w[0])
-#             vocabulary_for_chars.add(w[0])
-#             voc_tags.add(w[-1].rstrip('\r\n'))
-#             # sent_words.append(w[0].lower())
-#             sent_words.append(w[0])
-#             sent_tags.append(w[-1].rstrip('\r\n'))
-#         training_words.append(sent_words)
-#         training_tags.append(sent_tags)
-
-#     # print(vocabulary)
-
-#     return training_words, training_tags, vocabulary, voc_tags, vocabulary_for_chars
-
 def load_train_vocabulary(path):
-    print(path)
+
     sentences = []
     sentence = []
     vocabulary = set()
@@ -229,7 +167,8 @@ def load_train_vocabulary(path):
     tags = []
     voc_tags = set()
     for line in codecs.open(path, 'r', encoding):
-        if line == "\r\n":
+
+        if line == "\n":
             sentences.append(sentence)
             sentence = []
         else:
@@ -240,41 +179,26 @@ def load_train_vocabulary(path):
         sent_words = []
         sent_tags = []
         for word in s:
-            # word = word.decode(encoding).split(u'===')
-            # word_ = word[0].lower().encode(encoding)
-            # tag = word[2].rstrip('\r\n').encode(encoding)
+
             w = word.split(' ')
 
-            # vocabulary.add(w[0])
-            # vocabulary_for_chars.add(w[0])
             voc_tags.add(w[-1].rstrip('\r\n'))
-            # sent_words.append(w[0].lower())
+
             sent_words.append(w[0])
             sent_tags.append(w[-1].rstrip('\r\n'))
         training_words.append(sent_words)
         training_tags.append(sent_tags)
 
-    # print(vocabulary)
-    count = 0
-    res = []
     for ws in training_words:
         for wws in ws:
             wws = wws.strip()
             if wws.isdigit():
                 wws = "$NUM$"
-            # split = wws.split("-")
-            # vocabulary.add("-")
-            # if len(split) > 1:
-            #     for a in split:
-            #         if wws.isdigit() or wws.replace(".", "", 1).isdigit() or wws.replace(",", "", 1).isdigit():
-            #             wws = "$NUM$"
-            #         vocabulary.add(a.lower())
+
             else:
                 vocabulary.add(wws.lower())
                 vocabulary_for_chars.add(wws)
-    print("len vocab", len(vocabulary))
-
-    save_vocabulary(vocabulary, "test-voc")
+    print(len(training_words))
     return training_words, training_tags, vocabulary, voc_tags, vocabulary_for_chars
 
 
@@ -303,20 +227,6 @@ def load_fasttext_vocab(pretrained_vectors_location):
         for line in f:
             word = line.strip().split(' ')[0]
             vocab.add(word)
-    # vocab = set()
-    # pretrained_embeddings = codecs.open(
-    #     pretrained_vectors_location, 'rb', encoding)
-
-    # for line in pretrained_embeddings:
-    #     if line:
-
-    #         word = line.strip()
-    #         if word:
-    #             word_ = word.split()[0]
-    #         # if word_.isdigit():
-    #         #     word_ = "$NUM$"
-    #         vocab.add(word_)
-    print("- done. {} tokens".format(len(vocab)))
 
     return vocab
 
@@ -324,11 +234,7 @@ def load_fasttext_vocab(pretrained_vectors_location):
 def save_vocabulary(vocabulary, location):
     f = codecs.open(location, 'w', encoding)
     for i, word in enumerate(vocabulary):
-        # word = word.replace(" ", "")
-        # if i != len(vocabulary) - 1:
-        #     # print(word.encode(encoding))
-        #     f.write("{}\n".format(word))
-        # else:
+
         f.write(word)
         f.write("\n")
 
@@ -388,8 +294,8 @@ def load_vocabulary_tags_keys(vocabulary_location):
 
 def export_trimmed_vectors(vocab):
 
-    embeddings = np.zeros([len(vocab), dim])
-    with open(pretrained_vectors_location, encoding='utf-8') as f:
+    embeddings = np.zeros([len(vocab), cfg.dim])
+    with open(cfg.pretrained_vectors_location, encoding='utf-8') as f:
         for line in f:
             line = line.strip().split(' ')
             word = line[0]
@@ -400,7 +306,7 @@ def export_trimmed_vectors(vocab):
 
                 embeddings[word_idx] = np.asarray(embedding)
 
-    np.savez_compressed(trimmed_embeddings_file, embeddings=embeddings)
+    np.savez_compressed(cfg.trimmed_embeddings_file, embeddings=embeddings)
 
 
 def get_trimmed_vectors(trimmed_embeddings_file):
@@ -412,13 +318,13 @@ def get_trimmed_vectors(trimmed_embeddings_file):
 def save_all_words():
 
     _, _, training_words, training_tags, voc_for_chars = load_train_vocabulary(
-        train_location)
+        cfg.train_location)
     _, _, training_words_test, training_tags_test, _ = load_train_vocabulary(
-        test_location)
+        cfg.test_location)
     _, _, training_words_dev, training_tags_dev, _ = load_train_vocabulary(
-        dev_location)
+        cfg.dev_location)
 
-    fast_words = load_fasttext_vocab(pretrained_vectors_location)
+    fast_words = load_fasttext_vocab(cfg.pretrained_vectors_location)
     # print(training_words)
     # comment fast words if nothing else is working...
 
@@ -427,14 +333,12 @@ def save_all_words():
     vocab_words = vocab_words_ & fast_words
     vocab_tags = training_tags | training_tags_test | training_tags_dev
     vocab_words.add("$UNK$")
-    print("Vocab words from dev and test set: ", len(vocab_words_))
-    print("Vocab words from fast text: ", len(fast_words))
-    print('len vocab', len(vocab_words))
+
     vocab_chars = get_char_vocab(voc_for_chars)
     vocab_chars.add("$UNK$")
-    save_vocabulary(vocab_words, './vocabulary/words')
-    save_vocabulary(vocab_tags, './vocabulary/tags')
-    save_vocabulary(vocab_chars, './vocabulary/chars')
+    save_vocabulary(vocab_words, cfg.vocabulary_location)
+    save_vocabulary(vocab_tags, cfg.vocabulary_tags_location)
+    save_vocabulary(vocab_chars, cfg.vocabulary_chars_location)
 
 
 def build_model(wordVectors, training_data_ids, words_to_ids, placeholders):
@@ -453,7 +357,7 @@ def build_model(wordVectors, training_data_ids, words_to_ids, placeholders):
     vocabulary = []
     count_used = 0
     count_all = 0
-    # wordVectors = load_pretrained_vec(pretrained_vectors_location, training_data_ids, words_to_ids)
+    # wordVectors = load_pretrained_vec(cfg.pretrained_vectors_location, training_data_ids, words_to_ids)
 
     # Call all batches in a loop
     # To be added
@@ -467,7 +371,7 @@ def build_model(wordVectors, training_data_ids, words_to_ids, placeholders):
     parameters['loss'], parameters['trans_params'] = add_loss_op(
         parameters['logits'], placeholders)
     parameters['train_op'] = add_train_op(
-        _lr_m, lr, parameters['loss'], placeholders)
+        cfg._lr_m, cfg.lr, parameters['loss'], placeholders)
 
     print('model is finally built')
     return parameters
@@ -501,8 +405,8 @@ def define_placeholders():
 
 
 def add_embeddings(wordVectors, placeholders):
-    nchars = len(load_vocabulary('./vocabulary/chars'))
-    nwords = len(load_vocabulary('./vocabulary/words'))
+    nchars = len(load_vocabulary(cfg.vocabulary_chars_location))
+    nwords = len(load_vocabulary(cfg.vocabulary_location))
     # with tf.variable_scope("words"):
     #     _word_embeddings = tf.get_variable(
     #         name="_word_embeddings",
@@ -523,21 +427,21 @@ def add_embeddings(wordVectors, placeholders):
         _char_embeddings = tf.get_variable(
             name="_char_embeddings",
             dtype=tf.float32,
-            shape=[nchars, dim_char])
+            shape=[nchars, cfg.dim_char])
         char_embeddings = tf.nn.embedding_lookup(_char_embeddings,
                                                  placeholders['char_ids'], name="char_embeddings")
 
         # put the time dimension on axis=1
         s = tf.shape(char_embeddings)
         char_embeddings = tf.reshape(char_embeddings,
-                                     shape=[s[0] * s[1], s[-2], dim_char])
+                                     shape=[s[0] * s[1], s[-2], cfg.dim_char])
         word_lengths = tf.reshape(
             placeholders['word_lengths'], shape=[s[0] * s[1]])
 
         # bi lstm on chars
-        cell_fw = tf.contrib.rnn.LSTMCell(hidden_size_char,
+        cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
                                           state_is_tuple=True)
-        cell_bw = tf.contrib.rnn.LSTMCell(hidden_size_char,
+        cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
                                           state_is_tuple=True)
         _output = tf.nn.bidirectional_dynamic_rnn(
             cell_fw, cell_bw, char_embeddings,
@@ -549,7 +453,7 @@ def add_embeddings(wordVectors, placeholders):
 
         # shape = (batch size, max sentence length, char hidden size)
         output = tf.reshape(output,
-                            shape=[s[0], s[1], 2 * hidden_size_char])
+                            shape=[s[0], s[1], 2 * cfg.hidden_size_char])
         word_embeddings = tf.concat([word_embeddings, output], axis=-1)
 
     word_embeddings_ = tf.nn.dropout(word_embeddings, placeholders['dropout'])
@@ -564,8 +468,8 @@ def add_logits_op(word_embeddings, placeholders):
     of scores, of dimension equal to the number of tags.
     """
     with tf.variable_scope("bi-lstm"):
-        cell_fw = tf.contrib.rnn.LSTMCell(hidden_size_lstm)
-        cell_bw = tf.contrib.rnn.LSTMCell(hidden_size_lstm)
+        cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
+        cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
         (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(
             cell_fw, cell_bw, word_embeddings,
             sequence_length=placeholders['sequence_lengths'], dtype=tf.float32)
@@ -574,15 +478,15 @@ def add_logits_op(word_embeddings, placeholders):
 
     with tf.variable_scope("proj"):
         W = tf.get_variable("W", dtype=tf.float32,
-                            shape=[2 * hidden_size_lstm, ntags])
+                            shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
 
-        b = tf.get_variable("b", shape=[ntags],
+        b = tf.get_variable("b", shape=[cfg.ntags],
                             dtype=tf.float32, initializer=tf.zeros_initializer())
 
         nsteps = tf.shape(output)[1]
-        output = tf.reshape(output, [-1, 2 * hidden_size_lstm])
+        output = tf.reshape(output, [-1, 2 * cfg.hidden_size_lstm])
         pred = tf.matmul(output, W) + b
-        logits = tf.reshape(pred, [-1, nsteps, ntags])
+        logits = tf.reshape(pred, [-1, nsteps, cfg.ntags])
     return logits
 
 
@@ -637,36 +541,6 @@ def initialize_session():
     saver = tf.train.Saver()
 
     return sess, saver
-
-
-def change_load_pretrained_vec(pretrained_vectors_location, training_data_ids, words_to_ids):
-
-    pretrained = dict()
-    wordsList = []
-    vocabulary = load_vocabulary(vocabulary_location)
-    pretrained_embeddings = codecs.open(
-        pretrained_vectors_location, 'rb', encoding)
-    new_file = codecs.open("pretrained_file", "w", encoding)
-    wordVectors = np.zeros([len(vocabulary), 300])
-
-    count = 0
-    for line in pretrained_embeddings:
-        if line:
-            # if count < 20:
-            word = line.lstrip("„").lower().encode(encoding).rstrip().split()[
-                0]
-            new_file.write(word.decode(encoding))
-            new_file.write("\n")
-            if len(line.split()) > 1:
-                if isinstance(line.split()[1], float):
-                    vector = [float(i) for i in line.split()[1:]]
-                    if word in words_to_ids:
-                        word_idx = words_to_ids[word]
-                        wordVectors[word_idx] = np.asarray(vector)
-                        count += 1
-                    vector = np.array(vector)
-
-    return wordVectors
 
 
 def pad_sequence(training_data):
@@ -754,6 +628,43 @@ def convert_tags_to_ids(location):
     return words_to_ids, ids_to_words
 
 
+def randomize_data():
+    lines = []
+    f1 = codecs.open("./dataset/bg/train.txt", "rb", encoding)
+    f2 = codecs.open("dataset/bg/testa.txt", "rb", encoding)
+    f3 = codecs.open("dataset/bg/testb.txt", "rb", encoding)
+    sentences = []
+    sentence = []
+    for line in f1:
+        if line == "\r\n":
+            sentences.append(sentence)
+            sentence = []
+        else:
+            sentence.append(line.strip())
+
+    for line2 in f2:
+        if line2 == "\r\n":
+            sentences.append(sentence)
+            sentence = []
+        else:
+            sentence.append(line2.strip())
+    for line3 in f3:
+        if line3 == "\r\n":
+            sentences.append(sentence)
+            sentence = []
+        else:
+            sentence.append(line3.strip())
+
+    shuffle(sentences)
+    f = codecs.open("all_without_bulletin.txt", "w", "utf-8")
+
+    for sen in sentences:
+        for s in sen:
+            f.write(s)
+            f.write("\n")
+        f.write('\n')
+
+
 def yield_data(location):
     niter = 0
     with open(location, encoding='utf-8') as f:
@@ -774,15 +685,16 @@ def yield_data(location):
                 tags += [tag]
 
 
-def build_train_data_test(location):
+def build_data_test(location):
 
     training_data_ids = []
     training_tags_ids = []
     ids_data = []
     ids_tags = []
-    words_to_ids, ids_to_words = convert_words_to_ids('./vocabulary/words')
-    tags_to_ids, ids_to_tags = convert_words_to_ids('./vocabulary/tags')
-    chars_to_ids, _ = convert_words_to_ids('./vocabulary/chars')
+    words_to_ids, ids_to_words = convert_words_to_ids(cfg.vocabulary_location)
+    tags_to_ids, ids_to_tags = convert_words_to_ids(
+        cfg.vocabulary_tags_location)
+    chars_to_ids, _ = convert_words_to_ids(cfg.vocabulary_chars_location)
 
     chars_in_word = []
     chars_words = []
@@ -813,21 +725,22 @@ def build_train_data_test(location):
     return training_data_ids, training_tags_ids, list_chars, words_to_ids, ids_to_words
 
 
-def build_train_data(training_data, training_tags):
+def build_data(training_data, training_tags):
 
     training_data_ids = []
     training_tags_ids = []
     ids_data = []
     ids_tags = []
-    words_to_ids, ids_to_words = convert_words_to_ids('./vocabulary/words')
-    tags_to_ids, ids_to_tags = convert_tags_to_ids('./vocabulary/tags')
+    words_to_ids, ids_to_words = convert_words_to_ids(cfg.vocabulary_location)
+    tags_to_ids, ids_to_tags = convert_tags_to_ids(
+        cfg.vocabulary_tags_location)
 
-    chars_to_ids, _ = convert_words_to_ids('./vocabulary/chars')
+    chars_to_ids, _ = convert_words_to_ids(cfg.vocabulary_chars_location)
 
     chars_in_word = []
     chars_words = []
     list_chars = []
-
+    unk = "$UNK$".encode(encoding)
     for sentence_words, sentence_tags in zip(training_data, training_tags):
 
         for word, tag in zip(sentence_words, sentence_tags):
@@ -838,7 +751,7 @@ def build_train_data(training_data, training_tags):
             if words_to_ids.get(word.lower().encode(encoding)) != None:
                 ids_data.append(words_to_ids[word.lower().encode(encoding)])
             else:
-                unk = "$UNK$".encode(encoding)
+
                 ids_data.append(words_to_ids[unk])
             word = word.encode(encoding)
             for w in list(word.decode(encoding)):
@@ -976,12 +889,12 @@ def load_vocabulary_list(fif):
 
 def evaluate(sess, test_data_ids, test_tags_id, chars_ids_test, placeholders, parameters):
     # batches_training_test, batches_tags_test = create_batches(test_data_ids, test_tags_id, n_test)
-    f = codecs.open("res-file", 'w', encoding)
+    f = codecs.open(cfg.result_location, 'w', encoding)
 
     accs = []
-    tags = load_vocabulary_tags('./vocabulary/tags')
-    tags_ = load_vocabulary_tags_keys('./vocabulary/tags')
-    words = load_vocabulary_to_id('./vocabulary/words')
+    tags = load_vocabulary_tags(cfg.vocabulary_tags_location)
+    tags_ = load_vocabulary_tags_keys(cfg.vocabulary_tags_location)
+    words = load_vocabulary_to_id(cfg.vocabulary_location)
     correct_preds, total_correct, total_preds = 0., 0., 0.
 
     correct = 0
@@ -992,10 +905,9 @@ def evaluate(sess, test_data_ids, test_tags_id, chars_ids_test, placeholders, pa
     O_all, b_loc_all, i_loc_all, b_org_all, i_org_all, b_pers_all, i_pers_all, b_oth_all, i_oth_all = 0, 0, 0, 0, 0, 0, 0, 0, 0
 
     batches_training, batches_tags, chars_ids_test_batch = create_batches(
-        test_data_ids, chars_ids_test, test_tags_id, batches_size)
-    # print('OVerall number of batches', print(batches_tags))
+        test_data_ids, chars_ids_test, test_tags_id, cfg.batches_size)
+
     for i, (batch_words, batch_tags, batch_chars) in enumerate(zip(batches_training, batches_tags, chars_ids_test_batch)):
-        # print('Batch', i)
 
         labels_pred, sequence_lengths = predict_batch(
             sess, batch_words, batch_chars, placeholders, parameters)
@@ -1032,86 +944,6 @@ def evaluate(sess, test_data_ids, test_tags_id, chars_ids_test, placeholders, pa
 
     print("acc", 100 * acc, "f1", f1 * 100)
     return f1 * 100
-    # Go to build_train_data
-    # =================================================
-    #         lab = lab[:length]
-    #         lab_pred = lab_pred[:length]
-    #         overall += len(lab)
-    #         accs += [a == b for (a, b) in zip(lab, lab_pred)]
-    #         for a, b in zip(lab, lab_pred):
-
-    #             if a == b:
-    #                 equal += 1
-    #                 if a != tags["O"]:
-
-    #                     count += 1
-    #             # print('Sentencec Ids')
-    #             # print(sentence)
-    #             # print('Real results')
-    #             # print(lab)
-    #             # print('Predicted results')
-    #             # print(lab_pred)
-
-    #             a_ = tags_[a]
-    #             overall += 1
-    #             if a_ == 'O':
-    #                 O_all += 1
-    #             if a_ == 'B-Loc':
-    #                 b_loc_all += 1
-    #             if a_ == 'I-Loc':
-    #                 i_loc_all += 1
-    #             if a_ == 'B-Pers':
-    #                 b_pers_all += 1
-    #             if a_ == 'I-Pers':
-    #                 i_pers_all += 1
-    #             if a_ == 'B-Org':
-    #                 b_org_all += 1
-    #             if a_ == 'I-Org':
-    #                 i_org_all += 1
-    #             if a_ == 'B-Other':
-    #                 b_oth_all += 1
-    #             if a_ == 'I-Other':
-    #                 i_oth_all += 1
-    #             if a == b:
-    #                 if a_ != 'O':
-    #                     correct += 1
-    #                 if a_ == 'O':
-    #                     O += 1
-    #                 if a_ == 'B-Loc':
-    #                     b_loc += 1
-    #                 if a_ == 'I-Loc':
-    #                     i_loc += 1
-    #                 if a_ == 'B-Pers':
-    #                     b_pers += 1
-    #                 if a_ == 'I-Pers':
-    #                     i_pers += 1
-    #                 if a_ == 'B-Org':
-    #                     b_org += 1
-    #                 if a_ == 'I-Org':
-    #                     i_org += 1
-    #                 if a_ == 'B-Other':
-    #                     b_oth += 1
-    #                 if a_ == 'I-Other':
-    #                     i_oth += 1
-
-    # print(correct)
-    # acc = np.mean(accs)
-    # print("accuracy", acc)
-    # print(' equal', equal)
-    # print("overall", overall)
-    # print("count", count)
-    # print('Overall result is:', correct * 100 / overall)
-    # print('Correct Other', O, O_all)
-    # print('Correct Loc', b_loc, b_loc_all,  i_loc, i_loc_all)
-    # print('Correct Org',  b_org, b_org_all,  i_org, i_org_all)
-    # print('Correct Pers',  b_pers, b_pers_all,   i_pers, i_pers_all)
-    # print('Correct B/I  Other',  b_oth, b_oth_all,  i_oth, i_oth_all)
-    # print('This is result from labeeeeeeeeeeeeeeeeeeeeeeeeling')
-    # return correct * 100 / overall
-    # print(batches_training[0][0])
-    # print(labels_pred[0])
-    # print('This is reeeeeeeeeeal label')
-    # print(batches_tags[0][0])
 
 
 def run_evaluate(location):
@@ -1125,9 +957,9 @@ def run_evaluate(location):
     #     lab = lab[:length]
     #     lab_pred = lab_pred[:length]
 
-    # training_data_ids, training_tags_ids, words_to_ids, ids_to_words = build_train_data(
+    # training_data_ids, training_tags_ids, words_to_ids, ids_to_words = build_data(
     #     location)
-    # test_data_ids, test_tags_ids, _, _ = build_train_data(test_location)
+    # test_data_ids, test_tags_ids, _, _ = build_data(test_location)
     # placeholders = define_placeholders()
     # parameters = build_model(training_data_ids, words_to_ids, placeholders)
     # sess, saver = initialize_session()
@@ -1141,6 +973,7 @@ def run_evaluate(location):
 
 
 def main():
+    # randomize_data()
     train_model()
     # run_evaluate('./dataset/bg/testb.txt')
     # get_fasttext_vocab(pretrained_vectors_location)
