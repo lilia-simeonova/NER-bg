@@ -3,7 +3,7 @@ encoding = 'utf-8'
 vocabulary_location = './vocabulary/words-bg'
 vocabulary_tags_location = './vocabulary/tags-bg'
 vocabulary_chars_location = './vocabulary/chars-bg'
-model = './results/model-bg-4'
+model = './results/models/model_1_adam'
 
 # vocabulary_location = './vocabulary/words'
 # vocabulary_tags_location = './vocabulary/tags'
@@ -16,11 +16,11 @@ model = './results/model-bg-4'
 
 all_data = './dataset/bg/all_data'
 
-train_location = './dataset/bg/all_data/cross/train_2.txt'
-dev_location = './dataset/bg/all_data/cross/test_2.txt'
-test_location = './dataset/bg/all_data/cross/test_2.txt'
+train_location = './dataset/bg/all_data/cross/train_0.txt'
+dev_location = './dataset/bg/all_data/cross/test_0_1.txt'
+test_location = './dataset/bg/all_data/cross/test_0_2.txt'
 
-result_location = "./results/tagged/res_2_1"
+result_location = "./results/tagged/res_1_final"
 
 pretrained_vectors_location = './embeddings/wiki.bg.vec'
 trimmed_embeddings_file = 'embeddings/trimmed.npz'
@@ -37,7 +37,7 @@ hidden_size_char = 100
 dim = 300
 dim_char = 100
 ntags = 9
-
+clip = -1
 
 batches_size = 20
 nepoch_no_imprv = 5

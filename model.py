@@ -18,9 +18,9 @@ def train_model():
     train_const = True
     #  ===================================================
     # Those can be run once
-    save_all_words()
-    voc = load_vocabulary(cfg.vocabulary_location)
-    export_trimmed_vectors(voc)
+    # save_all_words()
+    # voc = load_vocabulary(cfg.vocabulary_location)
+    # export_trimmed_vectors(voc)
     #
     # =============================================================
 
@@ -70,6 +70,8 @@ def train(sess, saver, training_data_ids, training_tags_ids, chars_ids, test_dat
         print("Epoch Num:", epoch)
         score = run_epoch(sess, saver, training_data_ids, training_tags_ids, chars_ids,
                           test_data_ids, test_tags_ids, chars_ids_test, parameters, placeholders)
+        # if epoch > 2 and epoch < 6:
+        #     cfg.lr = 0.005
         cfg.lr = cfg.lr * cfg.lr_decay
         print('=============================')
         print('current score', score)
@@ -92,14 +94,15 @@ def run_epoch(sess, saver, training_data_ids, training_tags_ids, chars_ids, test
         training_data_ids, chars_ids, training_tags_ids, cfg.batches_size)
 
     for i, (batch_training, batch_tags, batch_chars_ids) in enumerate(zip(batches_training, batches_tags, batches_chars_ids)):
-        print('batch', i)
+        # print('batch', i)
 
         fd, _ = get_feed(batch_training, batch_chars_ids,
                          placeholders, batch_tags, cfg.lr, cfg.dropout)
 
         _, train_loss = sess.run(
             [parameters['train_op'], parameters['loss']], feed_dict=fd)
-        print('train_loss', train_loss)
+
+    print('train_loss', train_loss)
 
     f1 = evaluate(sess, test_data_ids, test_tags_id,
                   chars_ids_test, placeholders, parameters)
@@ -168,7 +171,7 @@ def load_train_vocabulary(path):
     voc_tags = set()
     for line in codecs.open(path, 'r', encoding):
 
-        if line == "\n":
+        if line == "\n" or line == "\r\n":
             sentences.append(sentence)
             sentence = []
         else:
@@ -516,18 +519,25 @@ def add_loss_op(logits, placeholders):
 
 def add_train_op(_lr_m, lr, loss, placeholders):
     with tf.variable_scope("train_step"):
-        if _lr_m == 'adam':  # sgd method
+        if _lr_m == 'adam':
             optimizer = tf.train.AdamOptimizer(placeholders['lr'])
         elif _lr_m == 'adagrad':
             optimizer = tf.train.AdagradOptimizer(placeholders['lr'])
         elif _lr_m == 'sgd':
             optimizer = tf.train.GradientDescentOptimizer(placeholders['lr'])
+        elif _lr_m == 'momentum':
+            optimizer = tf.train.MomentumOptimizer(
+                learning_rate=placeholders['lr'], momentum=0.9, use_nesterov=True)
         elif _lr_m == 'rmsprop':
             optimizer = tf.train.RMSPropOptimizer(placeholders['lr'])
         else:
             raise NotImplementedError("Unknown method {}".format(_lr_m))
-
-        train_op = optimizer.minimize(loss)
+        if cfg.clip > 0:
+            grads, vs = zip(*optimizer.compute_gradients(loss))
+            grads, gnorm = tf.clip_by_global_norm(grads, cfg.clip)
+            train_op = optimizer.apply_gradients(zip(grads, vs))
+        else:
+            train_op = optimizer.minimize(loss)
 
     return train_op
 
@@ -932,15 +942,15 @@ def evaluate(sess, test_data_ids, test_tags_id, chars_ids_test, placeholders, pa
             correct_preds += len(lab_chunks & lab_pred_chunks)
             total_preds += len(lab_pred_chunks)
             total_correct += len(lab_chunks)
-    print("correct predictions", correct_preds)
-    print("total predictions", total_preds)
-    print("total correct", total_correct)
+    # print("correct predictions", correct_preds)
+    # print("total predictions", total_preds)
+    # print("total correct", total_correct)
     p = correct_preds / total_preds if correct_preds > 0 else 0
     r = correct_preds / total_correct if correct_preds > 0 else 0
     f1 = 2 * p * r / (p + r) if correct_preds > 0 else 0
     acc = np.mean(accs)
-    print("precision", p)
-    print("recall", r)
+    # print("precision", p)
+    # print("recall", r)
 
     print("acc", 100 * acc, "f1", f1 * 100)
     return f1 * 100
