@@ -2,14 +2,16 @@ import codecs
 import tensorflow as tf
 import numpy as np
 import config as cfg
+
 from random import shuffle
+from gensim.models.keyedvectors import KeyedVectors
 """
 Note: data should end with two new lines
 """
 parameters = {}
 
 encoding = cfg.encoding
-
+type_of_emb = 'att'
 
 def train_model():
     """
@@ -18,6 +20,8 @@ def train_model():
     train_const = True
     #  ===================================================
     # Those can be run once
+    # model = KeyedVectors.load_word2vec_format('embeddings/word2vec.bin', binary=True)
+    # model.save_word2vec_format('embeddings/word2vec.txt', binary=False)
     # save_all_words()
     # voc = load_vocabulary(cfg.vocabulary_location)
     # export_trimmed_vectors(voc)
@@ -98,7 +102,7 @@ def run_epoch(sess, saver, training_data_ids, training_tags_ids, chars_ids, test
 
         fd, _ = get_feed(batch_training, batch_chars_ids,
                          placeholders, batch_tags, cfg.lr, cfg.dropout)
-
+        # break
         _, train_loss = sess.run(
             [parameters['train_op'], parameters['loss']], feed_dict=fd)
 
@@ -144,7 +148,7 @@ def get_feed(training_data, batch_chars_ids, placeholders, labels=None, lr=None,
         placeholders['char_ids']: char_ids_,
         placeholders['word_lengths']: word_lengths_
     }
-
+   
     if labels is not None:
 
         labels_, _ = pad_sequence(labels)
@@ -156,6 +160,7 @@ def get_feed(training_data, batch_chars_ids, placeholders, labels=None, lr=None,
     if dropout is not None:
         feed[placeholders['dropout']] = cfg.dropout
 
+    # print (feed)
     return feed, sequence_lengths_
 
 
@@ -201,7 +206,7 @@ def load_train_vocabulary(path):
             else:
                 vocabulary.add(wws.lower())
                 vocabulary_for_chars.add(wws)
-    print(len(training_words))
+
     return training_words, training_tags, vocabulary, voc_tags, vocabulary_for_chars
 
 
@@ -224,12 +229,17 @@ def get_char_vocab(dataset):
     return vocab_char
 
 
+
+
 def load_fasttext_vocab(pretrained_vectors_location):
+    print (' loading fast text')
     vocab = set()
     with open(pretrained_vectors_location, encoding="utf-8") as f:
         for line in f:
+
             word = line.strip().split(' ')[0]
-            vocab.add(word)
+
+            vocab.add(word.lower())
 
     return vocab
 
@@ -308,7 +318,7 @@ def export_trimmed_vectors(vocab):
                 word_idx = vocab[word.encode(encoding)]
 
                 embeddings[word_idx] = np.asarray(embedding)
-
+   
     np.savez_compressed(cfg.trimmed_embeddings_file, embeddings=embeddings)
 
 
@@ -406,6 +416,19 @@ def define_placeholders():
     }
     return placeholders
 
+def conv2d(input_, output_dim, k_h, k_w,
+           stddev=0.02, name="conv2d"):
+  with tf.variable_scope(name):
+    print ('=================================================')
+
+    w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],
+              initializer=tf.truncated_normal_initializer(stddev=stddev))
+    print(w)
+    print(input_)
+    conv = tf.nn.conv2d(input_, w, strides=[1, 1, 1, 1], padding='VALID')
+    print ('=================================================')
+    return conv
+
 
 def add_embeddings(wordVectors, placeholders):
     nchars = len(load_vocabulary(cfg.vocabulary_chars_location))
@@ -421,48 +444,171 @@ def add_embeddings(wordVectors, placeholders):
             wordVectors,
             name="_word_embeddings",
             dtype=tf.float32,
-            trainable=True)
+            trainable=False)
         word_embeddings = tf.nn.embedding_lookup(_word_embeddings,
                                                  placeholders['word_ids'], name="word_embeddings")
+    if type_of_emb == 'lstm':
+        with tf.variable_scope("chars"):
 
-    with tf.variable_scope("chars"):
+            _char_embeddings = tf.get_variable(
+                name="_char_embeddings",
+                dtype=tf.float32,
+                shape=[nchars, cfg.dim_char])
+            char_embeddings = tf.nn.embedding_lookup(_char_embeddings,
+                                                    placeholders['char_ids'], name="char_embeddings")
 
-        _char_embeddings = tf.get_variable(
-            name="_char_embeddings",
-            dtype=tf.float32,
-            shape=[nchars, cfg.dim_char])
-        char_embeddings = tf.nn.embedding_lookup(_char_embeddings,
-                                                 placeholders['char_ids'], name="char_embeddings")
+            # put the time dimension on axis=1
+            s = tf.shape(char_embeddings)
+            char_embeddings = tf.reshape(char_embeddings,
+                                        shape=[s[0] * s[1], s[-2], cfg.dim_char])
+            word_lengths = tf.reshape(
+                placeholders['word_lengths'], shape=[s[0] * s[1]])
 
-        # put the time dimension on axis=1
-        s = tf.shape(char_embeddings)
-        char_embeddings = tf.reshape(char_embeddings,
-                                     shape=[s[0] * s[1], s[-2], cfg.dim_char])
-        word_lengths = tf.reshape(
-            placeholders['word_lengths'], shape=[s[0] * s[1]])
+            # bi lstm on chars
+            cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
+                                            state_is_tuple=True)
+            cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
+                                            state_is_tuple=True)
+            _output = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw, cell_bw, char_embeddings,
+                sequence_length=word_lengths, dtype=tf.float32)
 
-        # bi lstm on chars
-        cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
-                                          state_is_tuple=True)
-        cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
-                                          state_is_tuple=True)
-        _output = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw, cell_bw, char_embeddings,
-            sequence_length=word_lengths, dtype=tf.float32)
+            # read and concat output
+            _, ((_, output_fw), (_, output_bw)) = _output
+            output = tf.concat([output_fw, output_bw], axis=-1)
 
-        # read and concat output
-        _, ((_, output_fw), (_, output_bw)) = _output
-        output = tf.concat([output_fw, output_bw], axis=-1)
+            # shape = (batch size, max sentence length, char hidden size)
+            output = tf.reshape(output,
+                                shape=[s[0], s[1], 2 * cfg.hidden_size_char])
+            word_embeddings = tf.concat([word_embeddings, output], axis=-1)
 
-        # shape = (batch size, max sentence length, char hidden size)
-        output = tf.reshape(output,
-                            shape=[s[0], s[1], 2 * cfg.hidden_size_char])
-        word_embeddings = tf.concat([word_embeddings, output], axis=-1)
+        word_embeddings_ = tf.nn.dropout(word_embeddings, placeholders['dropout'])
 
-    word_embeddings_ = tf.nn.dropout(word_embeddings, placeholders['dropout'])
+        return word_embeddings_
 
-    return word_embeddings_
+    if type_of_emb == 'cnn':
+        feature_maps=[50, 100, 150, 200, 200, 200, 200]
+        kernels=[1,2,3,4,5,6,7]
+        with tf.variable_scope("chars"):
+            char_W = tf.get_variable("char_embed", [135, cfg.dim_char])
 
+            char_inputs = tf.placeholder(tf.int32, [cfg.batches_size, 50, 60])
+            char_indices = tf.split(1, 50,placeholders['word_ids'])
+
+            for idx in range(1,50):
+                print (char_indices[idx])
+                char_index = tf.reshape(char_indices[idx], [-1, 50])
+                char_embed = tf.nn.embedding_lookup(char_W, char_index)
+
+
+            # put the time dimension on axis=1
+            
+            # cnn on chars
+
+            layers = []
+            input_= char_embeddings
+            for idx, kernel_dim in enumerate(kernels):
+                reduced_length = input_.get_shape()[1] - kernel_dim + 1
+
+                # [batch_size x seq_length x embed_dim x feature_map_dim]
+
+                conv = conv2d(input_, feature_maps[idx], kernel_dim , cfg.dim_char,
+                            name="kernel%d" % idx)
+
+                # [batch_size x 1 x 1 x feature_map_dim]
+                pool = tf.nn.max_pool(tf.tanh(conv), [1, reduced_length, 1, 1], [1, 1, 1, 1], 'VALID')
+
+                layers.append(tf.squeeze(pool))
+
+            
+                char_cnn= tf.concat(1, layers)
+            
+            # char_cnn = TDNN(char_embeddings, cfg.dim_char, feature_maps, kernels)
+
+            word_embeddings = tf.concat([word_embeddings, char_cnn], axis=-1)
+
+            
+
+            
+        word_embeddings_ = tf.nn.dropout(output, placeholders['dropout'])
+
+        return word_embeddings_
+
+    if type_of_emb == 'att':
+        with tf.variable_scope("chars"):
+
+            _char_embeddings = tf.get_variable(
+                name="_char_embeddings",
+                dtype=tf.float32,
+                shape=[nchars, cfg.dim_char])
+            char_embeddings = tf.nn.embedding_lookup(_char_embeddings,
+                                                    placeholders['char_ids'], name="char_embeddings")
+
+            # put the time dimension on axis=1
+            s = tf.shape(char_embeddings)
+            char_embeddings = tf.reshape(char_embeddings,
+                                        shape=[s[0] * s[1], s[-2], cfg.dim_char])
+            word_lengths = tf.reshape(
+                placeholders['word_lengths'], shape=[s[0] * s[1]])
+
+            # bi lstm on chars
+            cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
+                                            state_is_tuple=True)
+            cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_char,
+                                            state_is_tuple=True)
+            _output = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw, cell_bw, char_embeddings,
+                sequence_length=word_lengths, dtype=tf.float32)
+
+            # read and concat output
+            _, ((_, output_fw), (_, output_bw)) = _output
+            output = tf.concat([output_fw, output_bw], axis=-1)
+
+            # shape = (batch size, max sentence length, char hidden size)
+            output = tf.reshape(output,
+                                shape=[s[0], s[1], 2 * cfg.hidden_size_char])
+
+            # Output is the chars representation
+            # ===========================================================
+            with tf.variable_scope("attention"):
+                print("Output vector size",output.shape)
+                #         W = tf.get_variable("W", dtype=tf.float32,shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
+                # initializer=tf.zeros_initializer()
+                # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim ,  cfg.hidden_size_lstm] ))
+                # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 * cfg.dim_char, 2 * cfg.hidden_size_char  ]))
+                # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  2* cfg.dim_char + cfg.dim,  2 * cfg.hidden_size_char + cfg.hidden_size_lstm]))
+
+                weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,  cfg.hidden_size_lstm,  cfg.dim ]))
+                weights_chars = tf.Variable(tf.random_normal([cfg.batches_size,  2 * cfg.hidden_size_char,2 * cfg.dim_char]))
+                weights_all = tf.Variable(tf.random_normal([cfg.batches_size,   2 * cfg.hidden_size_char + cfg.hidden_size_lstm, 2 * cfg.dim_char + cfg.dim]))
+            
+                # word_embeddings = tf.concat([word_embeddings, output], axis=-1)
+                h1    = tf.nn.sigmoid(tf.matmul(word_embeddings, weights_words))  # The \sigma function
+
+                h2    = tf.nn.sigmoid(tf.matmul(output, weights_chars))
+
+                s = tf.shape(h2)
+                # h2 = tf.reshape(char_embeddings,
+                #                         shape=[s[0] * s[1], s[-2], cfg.dim])
+
+                # h2 = tf.reshape(h2,
+                #                      shape=[h2.shape[0], h2.shape[1], h1.shape[2]])
+
+                res = tf.tanh(tf.concat([h1, h2], axis = -1))
+
+                print('resssss shape', res.shape)
+                h3 = tf.nn.sigmoid(tf.matmul(res, weights_all))
+                # a = tf.matmul(res, weights_all)
+                # print('a:', a)
+                # h3 = tf.nn.tanh(tf.matmul(res, weights_all))
+                # # h3 = tf.reshape(h3, shape = [-1, -1,h3.shape[2]])
+                # print('shape h3', h3.shape)
+                # Current issue is with dropout of h3!!!!!!!!!!!!!!!
+                print('shape of h2:', h2)
+                # print('shape of h3', h3)
+        word_embeddings_ = tf.nn.dropout(h3, placeholders['dropout'])
+        
+        return word_embeddings_
 
 def add_logits_op(word_embeddings, placeholders):
     """Defines logits
@@ -470,6 +616,9 @@ def add_logits_op(word_embeddings, placeholders):
     For each word in each sentence of the batch, it corresponds to a vector
     of scores, of dimension equal to the number of tags.
     """
+    print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    print('how word embeddings should look like:', word_embeddings)
+
     with tf.variable_scope("bi-lstm"):
         cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
         cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
@@ -477,9 +626,11 @@ def add_logits_op(word_embeddings, placeholders):
             cell_fw, cell_bw, word_embeddings,
             sequence_length=placeholders['sequence_lengths'], dtype=tf.float32)
         output = tf.concat([output_fw, output_bw], axis=-1)
+        # print('lstm output shape', output.shape)
         output = tf.nn.dropout(output, placeholders['dropout'])
 
     with tf.variable_scope("proj"):
+
         W = tf.get_variable("W", dtype=tf.float32,
                             shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
 
@@ -488,6 +639,8 @@ def add_logits_op(word_embeddings, placeholders):
 
         nsteps = tf.shape(output)[1]
         output = tf.reshape(output, [-1, 2 * cfg.hidden_size_lstm])
+        print('=============')
+        # print(output.shape)
         pred = tf.matmul(output, W) + b
         logits = tf.reshape(pred, [-1, nsteps, cfg.ntags])
     return logits
@@ -558,7 +711,7 @@ def pad_sequence(training_data):
     sequence_length = []
 
     max_length = max(map(lambda x: len(x), training_data))
-
+    # max_length = 20
     for data in training_data:
         data = list(data)
         data_ = data[:max_length] + [0] * max(max_length - len(data), 0)
@@ -815,6 +968,8 @@ def predict_batch(sess, data, chars_ids_test, placeholders, parameters):
         viterbi_sequences += [viterbi_seq]
 
     return viterbi_sequences, sequence_lengths
+
+    
     # labels_pred = sess.run(parameters['labels_pred'], feed_dict=fd)
 
     # return labels_pred, sequence_lengths
