@@ -11,7 +11,7 @@ Note: data should end with two new lines
 parameters = {}
 
 encoding = cfg.encoding
-type_of_emb = 'att'
+type_of_emb = 'lstm'
 
 def train_model():
     """
@@ -574,13 +574,13 @@ def add_embeddings(wordVectors, placeholders):
                 print("Output vector size",output.shape)
                 #         W = tf.get_variable("W", dtype=tf.float32,shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
                 # initializer=tf.zeros_initializer()
-                # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim ,  cfg.hidden_size_lstm] ))
-                # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 * cfg.dim_char, 2 * cfg.hidden_size_char  ]))
-                # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  2* cfg.dim_char + cfg.dim,  2 * cfg.hidden_size_char + cfg.hidden_size_lstm]))
+                weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim , cfg.hidden_size_lstm] ))
+                weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 * cfg.dim_char, 2 * cfg.hidden_size_char ]))
+                weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  2* cfg.dim_char + cfg.dim,  2 * cfg.hidden_size_char + cfg.hidden_size_lstm]))
 
-                weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,  cfg.hidden_size_lstm,  cfg.dim ]))
-                weights_chars = tf.Variable(tf.random_normal([cfg.batches_size,  2 * cfg.hidden_size_char,2 * cfg.dim_char]))
-                weights_all = tf.Variable(tf.random_normal([cfg.batches_size,   2 * cfg.hidden_size_char + cfg.hidden_size_lstm, 2 * cfg.dim_char + cfg.dim]))
+                # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,  cfg.hidden_size_lstm,  cfg.dim ]))
+                # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size,  2 * cfg.hidden_size_char,2 * cfg.dim_char]))
+                # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,   2 * cfg.hidden_size_char + cfg.hidden_size_lstm, 2 * cfg.dim_char + cfg.dim]))
             
                 # word_embeddings = tf.concat([word_embeddings, output], axis=-1)
                 h1    = tf.nn.sigmoid(tf.matmul(word_embeddings, weights_words))  # The \sigma function

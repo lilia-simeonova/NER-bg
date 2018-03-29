@@ -16,9 +16,9 @@ model = './results/models/res_bg_0_30epoch'
 
 all_data = './dataset/bg/all_data'
 
-train_location = './dataset/bg/all_data/cross/train_0.txt'
-dev_location = './dataset/bg/all_data/cross/test_0.txt'
-test_location = './dataset/bg/all_data/cross/test_0.txt'
+train_location = './dataset/train_0.txt'
+dev_location = './dataset/test_0.txt'
+test_location = './dataset/test_0.txt'
 
 result_location = "./results/tagged/res_bg_0_30epoch"
 
@@ -31,7 +31,7 @@ trimmed_embeddings_file = 'embeddings/trimmed.npz'
 _lr_m = 'adam'
 dropout = 0.5
 lr = 0.001
-lr_decay = 0.9
+lr_decay = 1
 hidden_size_lstm = 300
 hidden_size_char = 100
 dim = 300
@@ -39,7 +39,7 @@ dim_char = 100
 ntags = 9
 clip = -1
 
-batches_size = 20
+batches_size = 5
 nepoch_no_imprv = 50
 
 epoch_range = 100
