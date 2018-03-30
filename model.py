@@ -11,7 +11,8 @@ Note: data should end with two new lines
 parameters = {}
 
 encoding = cfg.encoding
-type_of_emb = 'lstm'
+type_of_emb = 'cnn'
+learning_model = 'lstm'
 
 def train_model():
     """
@@ -416,19 +417,6 @@ def define_placeholders():
     }
     return placeholders
 
-def conv2d(input_, output_dim, k_h, k_w,
-           stddev=0.02, name="conv2d"):
-  with tf.variable_scope(name):
-    print ('=================================================')
-
-    w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],
-              initializer=tf.truncated_normal_initializer(stddev=stddev))
-    print(w)
-    print(input_)
-    conv = tf.nn.conv2d(input_, w, strides=[1, 1, 1, 1], padding='VALID')
-    print ('=================================================')
-    return conv
-
 
 def add_embeddings(wordVectors, placeholders):
     nchars = len(load_vocabulary(cfg.vocabulary_chars_location))
@@ -487,52 +475,46 @@ def add_embeddings(wordVectors, placeholders):
         return word_embeddings_
 
     if type_of_emb == 'cnn':
-        feature_maps=[50, 100, 150, 200, 200, 200, 200]
-        kernels=[1,2,3,4,5,6,7]
-        with tf.variable_scope("chars"):
-            char_W = tf.get_variable("char_embed", [135, cfg.dim_char])
+       
+        token_lengths = tf.placeholder(tf.int32, [None, None], name="tok_lengths")
+        input_dropout_keep_prob = tf.placeholder_with_default(1.0, [], name="input_dropout_keep_prob")
+        with tf.variable_scope("char-forward", reuse=False):
+            _char_embeddings = tf.get_variable(
+                name="_char_embeddings",
+                dtype=tf.float32,
+                shape=[nchars, cfg.dim_char])
+            char_embeddings_lookup = tf.nn.embedding_lookup(_char_embeddings, placeholders['char_ids'])
+            s = tf.shape(char_embeddings_lookup)
+            max_token_len =  tf.reshape(
+                    placeholders['word_lengths'], shape=[s[0] * s[1]])
+            # max_token_len = placeholders['word_lengths']
+            print(char_embeddings_lookup.get_shape())
 
-            char_inputs = tf.placeholder(tf.int32, [cfg.batches_size, 50, 60])
-            char_indices = tf.split(1, 50,placeholders['word_ids'])
+            char_embeddings_flat = tf.reshape(char_embeddings_lookup, 
+            tf.stack([cfg.batches_size*placeholders['sequence_lengths'], max_token_len, cfg.dim]))
+            print(char_embeddings_flat.get_shape())
+            tok_lens_flat = tf.reshape(token_lengths, [cfg.batches_size*placeholders['sequence_lengths']])
+            print(tok_lens_flat.get_shape())
 
-            for idx in range(1,50):
-                print (char_indices[idx])
-                char_index = tf.reshape(char_indices[idx], [-1, 50])
-                char_embed = tf.nn.embedding_lookup(char_W, char_index)
+            input_feats_expanded = tf.expand_dims(char_embeddings_flat, 1)
+            input_feats_expanded_drop = tf.nn.dropout(input_feats_expanded, input_dropout_keep_prob)
 
 
-            # put the time dimension on axis=1
-            
-            # cnn on chars
+            with tf.name_scope("char-cnn"):
+                filter_shape = [1, 0, 100, 100]
 
-            layers = []
-            input_= char_embeddings
-            for idx, kernel_dim in enumerate(kernels):
-                reduced_length = input_.get_shape()[1] - kernel_dim + 1
+                w = tf.get_variable("conv0_w", initializer=tf.truncated_normal(filter_shape, stddev=0.1))
+                # w = tf.get_variable("conv0_w", shape=filter_shape, initializer=tf.contrib.layers.xavier_initializer())
+                b = tf.get_variable("conv0_b", initializer=tf.constant(0.01, shape=[100]))
+                conv0 = tf.nn.conv2d(input_feats_expanded_drop, w, strides=[1, 1, 1, 1], padding="SAME", name="conv0")
+                print("conv0", conv0.get_shape())
+                h_squeeze = tf.squeeze(conv0, [1])
+                print("squeeze", h_squeeze.get_shape())
+                hidden_outputs = tf.reduce_max(h_squeeze, 1)
+                print("max", hidden_outputs.get_shape())
+                hidden_outputs_unflat = tf.reshape(hidden_outputs, tf.stack([cfg.batches_size, placeholders['sequence_lengths'], 100]))
 
-                # [batch_size x seq_length x embed_dim x feature_map_dim]
-
-                conv = conv2d(input_, feature_maps[idx], kernel_dim , cfg.dim_char,
-                            name="kernel%d" % idx)
-
-                # [batch_size x 1 x 1 x feature_map_dim]
-                pool = tf.nn.max_pool(tf.tanh(conv), [1, reduced_length, 1, 1], [1, 1, 1, 1], 'VALID')
-
-                layers.append(tf.squeeze(pool))
-
-            
-                char_cnn= tf.concat(1, layers)
-            
-            # char_cnn = TDNN(char_embeddings, cfg.dim_char, feature_maps, kernels)
-
-            word_embeddings = tf.concat([word_embeddings, char_cnn], axis=-1)
-
-            
-
-            
-        word_embeddings_ = tf.nn.dropout(output, placeholders['dropout'])
-
-        return word_embeddings_
+        return hidden_outputs_unflat
 
     if type_of_emb == 'att':
         with tf.variable_scope("chars"):
@@ -619,31 +601,35 @@ def add_logits_op(word_embeddings, placeholders):
     print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
     print('how word embeddings should look like:', word_embeddings)
 
-    with tf.variable_scope("bi-lstm"):
-        cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
-        cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
-        (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(
-            cell_fw, cell_bw, word_embeddings,
-            sequence_length=placeholders['sequence_lengths'], dtype=tf.float32)
-        output = tf.concat([output_fw, output_bw], axis=-1)
-        # print('lstm output shape', output.shape)
-        output = tf.nn.dropout(output, placeholders['dropout'])
+    if learning_model == "lstm":
+        with tf.variable_scope("bi-lstm"):
+            cell_fw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
+            cell_bw = tf.contrib.rnn.LSTMCell(cfg.hidden_size_lstm)
+            (output_fw, output_bw), _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw, cell_bw, word_embeddings,
+                sequence_length=placeholders['sequence_lengths'], dtype=tf.float32)
+            output = tf.concat([output_fw, output_bw], axis=-1)
+            # print('lstm output shape', output.shape)
+            output = tf.nn.dropout(output, placeholders['dropout'])
 
-    with tf.variable_scope("proj"):
+        with tf.variable_scope("proj"):
 
-        W = tf.get_variable("W", dtype=tf.float32,
-                            shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
+            W = tf.get_variable("W", dtype=tf.float32,
+                                shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
 
-        b = tf.get_variable("b", shape=[cfg.ntags],
-                            dtype=tf.float32, initializer=tf.zeros_initializer())
+            b = tf.get_variable("b", shape=[cfg.ntags],
+                                dtype=tf.float32, initializer=tf.zeros_initializer())
 
-        nsteps = tf.shape(output)[1]
-        output = tf.reshape(output, [-1, 2 * cfg.hidden_size_lstm])
-        print('=============')
-        # print(output.shape)
-        pred = tf.matmul(output, W) + b
-        logits = tf.reshape(pred, [-1, nsteps, cfg.ntags])
-    return logits
+            nsteps = tf.shape(output)[1]
+            output = tf.reshape(output, [-1, 2 * cfg.hidden_size_lstm])
+            print('=============')
+            # print(output.shape)
+            pred = tf.matmul(output, W) + b
+            logits = tf.reshape(pred, [-1, nsteps, cfg.ntags])
+        return logits
+
+    if learning_model == 'cnn':
+        print ('a')
 
 
 def add_pred_op(logits):
