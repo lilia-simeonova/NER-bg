@@ -11,7 +11,7 @@ Note: data should end with two new lines
 parameters = {}
 
 encoding = cfg.encoding
-type_of_emb = 'cnn'
+type_of_emb = 'att'
 learning_model = 'lstm'
 
 def train_model():
@@ -77,6 +77,8 @@ def train(sess, saver, training_data_ids, training_tags_ids, chars_ids, test_dat
                           test_data_ids, test_tags_ids, chars_ids_test, parameters, placeholders)
         # if epoch > 2 and epoch < 6:
         #     cfg.lr = 0.005
+        # if epoch < 10 or score < 81:
+        # else:
         cfg.lr = cfg.lr * cfg.lr_decay
         print('=============================')
         print('current score', score)
@@ -492,12 +494,12 @@ def add_embeddings(wordVectors, placeholders):
 
             char_embeddings_flat = tf.reshape(char_embeddings_lookup, 
             tf.stack([cfg.batches_size*placeholders['sequence_lengths'], max_token_len, cfg.dim]))
-            print(char_embeddings_flat.get_shape())
-            tok_lens_flat = tf.reshape(token_lengths, [cfg.batches_size*placeholders['sequence_lengths']])
-            print(tok_lens_flat.get_shape())
+            # print(char_embeddings_flat.get_shape())
+            # tok_lens_flat = tf.reshape(token_lengths, [cfg.batches_size*placeholders['sequence_lengths']])
+            # print(tok_lens_flat.get_shape())
 
-            input_feats_expanded = tf.expand_dims(char_embeddings_flat, 1)
-            input_feats_expanded_drop = tf.nn.dropout(input_feats_expanded, input_dropout_keep_prob)
+            # input_feats_expanded = tf.expand_dims(char_embeddings_flat, 1)
+            input_feats_expanded_drop = tf.nn.dropout(char_embeddings_lookup, input_dropout_keep_prob)
 
 
             with tf.name_scope("char-cnn"):
@@ -512,9 +514,9 @@ def add_embeddings(wordVectors, placeholders):
                 print("squeeze", h_squeeze.get_shape())
                 hidden_outputs = tf.reduce_max(h_squeeze, 1)
                 print("max", hidden_outputs.get_shape())
-                hidden_outputs_unflat = tf.reshape(hidden_outputs, tf.stack([cfg.batches_size, placeholders['sequence_lengths'], 100]))
-
-        return hidden_outputs_unflat
+                # hidden_outputs = tf.reshape(hidden_outputs, tf.stack([cfg.batches_size, placeholders['sequence_lengths'], 100]))
+                # word_embeddings = tf.concat([word_embeddings, hidden_outputs], axis=-1)
+        return word_embeddings
 
     if type_of_emb == 'att':
         with tf.variable_scope("chars"):
@@ -552,43 +554,92 @@ def add_embeddings(wordVectors, placeholders):
 
             # Output is the chars representation
             # ===========================================================
+
+            print('Word emb shape')
+            print('====================')
+            print(output.shape)
             with tf.variable_scope("attention"):
-                print("Output vector size",output.shape)
+                
                 #         W = tf.get_variable("W", dtype=tf.float32,shape=[2 * cfg.hidden_size_lstm, cfg.ntags])
                 # initializer=tf.zeros_initializer()
-                weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim , cfg.hidden_size_lstm] ))
-                weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 * cfg.dim_char, 2 * cfg.hidden_size_char ]))
-                weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  2* cfg.dim_char + cfg.dim,  2 * cfg.hidden_size_char + cfg.hidden_size_lstm]))
+
+                # Working solution
+                # ==============================
+                # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim , cfg.hidden_size_lstm] ))
+                # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 * cfg.dim_char, 2 * cfg.hidden_size_char ]))
+                # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  2* cfg.dim_char + cfg.dim,  2 * cfg.hidden_size_char + cfg.hidden_size_lstm]))
+                # ==============================
+                # Working solution
+                # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,   cfg.dim , cfg.hidden_size_lstm] ))
+                # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size, 2 *cfg.dim_char, cfg.hidden_size_char ]))
+                # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,  cfg.dim + cfg.dim_char,  cfg.hidden_size_lstm]))
+               
+
+                weights_words = tf.Variable(tf.zeros([ cfg.batches_size,  cfg.hidden_size_lstm, cfg.dim ] ))
+                b1 = tf.get_variable('b1',[1,],
+                         initializer=tf.constant_initializer(0.0))
+                b2 = tf.get_variable('b2',[1,],
+                         initializer=tf.constant_initializer(0.0))
+
+                weights_chars = tf.Variable(tf.zeros([cfg.batches_size, 2 *cfg.hidden_size_char, 2 *cfg.dim_char ]))
+                weights_all = tf.Variable(tf.zeros([cfg.batches_size,  cfg.hidden_size_lstm, cfg.dim]))
+               
 
                 # weights_words = tf.Variable(tf.random_normal([ cfg.batches_size,  cfg.hidden_size_lstm,  cfg.dim ]))
                 # weights_chars = tf.Variable(tf.random_normal([cfg.batches_size,  2 * cfg.hidden_size_char,2 * cfg.dim_char]))
                 # weights_all = tf.Variable(tf.random_normal([cfg.batches_size,   2 * cfg.hidden_size_char + cfg.hidden_size_lstm, 2 * cfg.dim_char + cfg.dim]))
             
                 # word_embeddings = tf.concat([word_embeddings, output], axis=-1)
-                h1    = tf.nn.sigmoid(tf.matmul(word_embeddings, weights_words))  # The \sigma function
+                h1    = tf.nn.sigmoid(tf.matmul(word_embeddings, weights_words) + b1)  # The \sigma function
+                print('Shape of H1')
+                print(h1.shape)
+                h2    = tf.nn.sigmoid(tf.matmul(output, weights_chars) + b2)
+                
+                print('Shape of H2')
+                print(h2.shape)
+                             
 
-                h2    = tf.nn.sigmoid(tf.matmul(output, weights_chars))
-
-                s = tf.shape(h2)
-                # h2 = tf.reshape(char_embeddings,
-                #                         shape=[s[0] * s[1], s[-2], cfg.dim])
-
-                # h2 = tf.reshape(h2,
-                #                      shape=[h2.shape[0], h2.shape[1], h1.shape[2]])
-
-                res = tf.tanh(tf.concat([h1, h2], axis = -1))
-
-                print('resssss shape', res.shape)
+                res = tf.nn.sigmoid(tf.add(h1, h2))
+                print('added h1 and h2', tf.add(h1,h2).shape)
+                print('Shapes:@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@')
+                print('res shape', res.shape)
+                print('word emb shape', weights_all.shape)
+                
                 h3 = tf.nn.sigmoid(tf.matmul(res, weights_all))
-                # a = tf.matmul(res, weights_all)
+                print('h3 shape', h3.shape)
+                one_vector = tf.ones_like(h3)
+                h3_reverse = tf.subtract(h3, one_vector, name=None)
+                # print('h3 reverse shape', h3_reverse.shape)
+                print('embd of words', word_embeddings.shape)
+                # h3 = tf.reshape(h3, shape = [cfg.batches_size, -1,h3.shape[2]])
+                sum1 = tf.add(h3, word_embeddings)
+                # print('sum1', sum1.shape)
+                sum2 = tf.add(h3_reverse, output)
+                # print('sum2', sum2.shape)
+                res2 = tf.add(sum1, sum2)
                 # print('a:', a)
                 # h3 = tf.nn.tanh(tf.matmul(res, weights_all))
-                # # h3 = tf.reshape(h3, shape = [-1, -1,h3.shape[2]])
+                
                 # print('shape h3', h3.shape)
                 # Current issue is with dropout of h3!!!!!!!!!!!!!!!
-                print('shape of h2:', h2)
+                # print('@@@@@@@@@@@@@@@@@@@@',aa)
                 # print('shape of h3', h3)
-        word_embeddings_ = tf.nn.dropout(h3, placeholders['dropout'])
+
+
+        # Best results 75.49 after 8 iterations with the following config:
+                    #   76.29 with the same below witouth reshaping, 16 iterations
+        #   h3 = tf.reshape(h3, shape = [cfg.batches_size, -1,h3.shape[2]])
+                # sum1 = tf.concat([h3, word_embeddings], axis=-1)
+                # # print('sum1', sum1.shape)
+                # sum2 = tf.concat([h3_reverse, output], axis=-1)
+                # # print('sum2', sum2.shape)
+                # res2 = tf.add(sum1, sum2)
+        # To test: 
+        # tanh tanh --- 71
+        # sigmoid tanh --- 69
+        # sigmoid sigmoid --- 76.7
+        # use best of above + not reversed h3 on both sides
+        word_embeddings_ = tf.nn.dropout(res2, placeholders['dropout'])
         
         return word_embeddings_
 
@@ -938,7 +989,7 @@ def predict_batch(sess, data, chars_ids_test, placeholders, parameters):
     # restore_session('./results/model', saver, sess)
 
     fd, sequence_lengths = get_feed(
-        data, chars_ids_test, placeholders, dropout=1.0)
+        data, chars_ids_test, placeholders, dropout=2.0)
 
     # get tag scores and transition params of CRF
     viterbi_sequences = []
